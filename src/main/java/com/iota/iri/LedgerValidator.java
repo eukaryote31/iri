@@ -221,20 +221,34 @@ public class LedgerValidator {
      */
     private MilestoneViewModel buildSnapshot(Snapshot latestSnapshot) throws Exception {
         MilestoneViewModel consistentMilestone = null;
+
         synchronized (latestSnapshot.snapshotSyncObject) {
             Snapshot updatedSnapshot = latestSnapshot.patch(new HashMap<>(), 0);
-            StateDiffViewModel stateDiffViewModel;
-            MilestoneViewModel snapshotMilestone = MilestoneViewModel.firstWithSnapshot(tangle);
-            while (snapshotMilestone != null) {
-                stateDiffViewModel = StateDiffViewModel.load(tangle, snapshotMilestone.getHash());
-                updatedSnapshot = updatedSnapshot.patch(stateDiffViewModel.getDiff(), snapshotMilestone.index());
-                if (updatedSnapshot.isConsistent()) {
-                    consistentMilestone = snapshotMilestone;
-                    latestSnapshot.merge(updatedSnapshot);
-                    snapshotMilestone = snapshotMilestone.nextWithSnapshot(tangle);
+            MilestoneViewModel candidateMilestone = MilestoneViewModel.first(tangle);
+
+            while (candidateMilestone != null) {
+                if (candidateMilestone.index() % 1000 == 0)
+                    log.info("Building snapshot... Consistent: #" +
+                            (consistentMilestone != null ? consistentMilestone.index() : -1) +
+                            ", Candidate: #" + candidateMilestone.index());
+
+                if (StateDiffViewModel.maybeExists(tangle, candidateMilestone.getHash())) {
+                    StateDiffViewModel stateDiffViewModel = StateDiffViewModel.load(tangle, candidateMilestone.getHash());
+
+                    if (stateDiffViewModel != null && !stateDiffViewModel.isEmpty()) {
+                        updatedSnapshot = updatedSnapshot.patch(stateDiffViewModel.getDiff(), candidateMilestone.index());
+
+                        if (updatedSnapshot.isConsistent()) {
+                            consistentMilestone = candidateMilestone;
+                            latestSnapshot.merge(updatedSnapshot);
+                        }
+                    }
                 }
+
+                candidateMilestone = candidateMilestone.next(tangle);
             }
         }
+
         return consistentMilestone;
     }
 
