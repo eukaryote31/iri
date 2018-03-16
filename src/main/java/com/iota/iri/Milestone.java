@@ -47,7 +47,7 @@ public class Milestone {
     public Hash latestMilestone = Hash.NULL_HASH;
     public Hash latestSolidSubtangleMilestone = latestMilestone;
 
-    public static final int MILESTONE_START_INDEX = 243000;
+    public static final int MILESTONE_START_INDEX = 338000;
     private static final int NUMBER_OF_KEYS_IN_A_MILESTONE = 20;
 
     public int latestMilestoneIndex = MILESTONE_START_INDEX;
@@ -77,12 +77,14 @@ public class Milestone {
         this.ledgerValidator = ledgerValidator;
         AtomicBoolean ledgerValidatorInitialized = new AtomicBoolean(false);
         (new Thread(() -> {
+            log.info("Waiting for Ledger Validator initialization...");
             while(!ledgerValidatorInitialized.get()) {
                 try {
                     Thread.sleep(1000);
                 } catch (InterruptedException e) {
                 }
             }
+            log.info("Tracker started.");
             while (!shuttingDown) {
                 long scanTime = System.currentTimeMillis();
 
@@ -118,14 +120,12 @@ public class Milestone {
                     }
 
                     if (previousLatestMilestoneIndex != latestMilestoneIndex) {
-
                         messageQ.publish("lmi %d %d", previousLatestMilestoneIndex, latestMilestoneIndex);
                         log.info("Latest milestone has changed from #" + previousLatestMilestoneIndex
                                 + " to #" + latestMilestoneIndex);
                     }
 
                     Thread.sleep(Math.max(1, RESCAN_INTERVAL - (System.currentTimeMillis() - scanTime)));
-
                 } catch (final Exception e) {
                     log.error("Error during Latest Milestone updating", e);
                 }
@@ -133,13 +133,14 @@ public class Milestone {
         }, "Latest Milestone Tracker")).start();
 
         (new Thread(() -> {
-
+            log.info("Initializing Ledger Validator...");
             try {
                 ledgerValidator.init();
                 ledgerValidatorInitialized.set(true);
             } catch (Exception e) {
                 log.error("Error initializing snapshots. Skipping.", e);
             }
+            log.info("Tracker started.");
             while (!shuttingDown) {
                 long scanTime = System.currentTimeMillis();
 

@@ -5,6 +5,7 @@ import com.iota.iri.TransactionValidator;
 import com.iota.iri.conf.Configuration;
 import com.iota.iri.controllers.TipsViewModel;
 import com.iota.iri.controllers.TransactionViewModel;
+import com.iota.iri.hash.SpongeFactory;
 import com.iota.iri.model.Hash;
 import com.iota.iri.storage.Tangle;
 import com.iota.iri.zmq.MessageQ;
@@ -88,8 +89,6 @@ public class Node {
     private static AtomicLong sendPacketsCounter = new AtomicLong(0L);
     private static AtomicLong sendPacketsTimer = new AtomicLong(0L);
 
-    private static double newTxLimit;
-
     public static final ConcurrentSkipListSet<String> rejectedAddresses = new ConcurrentSkipListSet<String>();
     private DatagramSocket udpSocket;
 
@@ -118,7 +117,6 @@ public class Node {
         P_REPLY_RANDOM_TIP = configuration.doubling(Configuration.DefaultConfSettings.P_REPLY_RANDOM_TIP.name());
         P_PROPAGATE_REQUEST = configuration.doubling(Configuration.DefaultConfSettings.P_PROPAGATE_REQUEST.name());
         sendLimit = (long) ((configuration.doubling(Configuration.DefaultConfSettings.SEND_LIMIT.name()) * 1000000) / (TRANSACTION_PACKET_SIZE * 8));
-        newTxLimit = configuration.doubling(Configuration.DefaultConfSettings.NEW_TX_LIMIT.name());
         debug = configuration.booling(Configuration.DefaultConfSettings.DEBUG);
 
         BROADCAST_QUEUE_SIZE = RECV_QUEUE_SIZE = REPLY_QUEUE_SIZE = configuration.integer(Configuration.DefaultConfSettings.Q_SIZE_NODE);
@@ -260,8 +258,9 @@ public class Node {
 
                     if (!cached) {
                         //if not, then validate
-                        receivedTransactionViewModel = TransactionValidator.validate(receivedData, transactionValidator.getMinWeightMagnitude());
+                        receivedTransactionViewModel = new TransactionViewModel(receivedData, Hash.calculate(receivedData, TransactionViewModel.TRINARY_SIZE, SpongeFactory.create(SpongeFactory.Mode.CURLP81)));
                         receivedTransactionHash = receivedTransactionViewModel.getHash();
+                        TransactionValidator.runValidation(receivedTransactionViewModel, transactionValidator.getMinWeightMagnitude());
 
                         synchronized (recentSeenBytes) {
                             recentSeenBytes.put(byteHash, receivedTransactionHash);
@@ -274,6 +273,14 @@ public class Node {
 
                 } catch (NoSuchAlgorithmException e) {
                     log.error("MessageDigest: " + e);
+                } catch (final TransactionValidator.StaleTimestampException e) {
+                    log.debug(e.getMessage());
+                    try {
+                        transactionRequester.clearTransactionRequest(receivedTransactionHash);
+                    } catch (Exception e1) {
+                        log.error(e1.getMessage());
+                    }
+                    neighbor.incInvalidTransactions();
                 } catch (final RuntimeException e) {
                     log.error(e.getMessage());
                     log.error("Received an Invalid TransactionViewModel. Dropping it...");
@@ -395,9 +402,7 @@ public class Node {
 
         //store new transaction
         try {
-            if (neighbor.isBelowNewTransactionLimit()) {
-                stored = receivedTransactionViewModel.store(tangle);
-            }
+            stored = receivedTransactionViewModel.store(tangle);
         } catch (Exception e) {
             log.error("Error accessing persistence store.", e);
             neighbor.incInvalidTransactions();
@@ -701,10 +706,10 @@ public class Node {
     public Neighbor newNeighbor(final URI uri, boolean isConfigured) {
         if (isUriValid(uri)) {
             if (uri.getScheme().equals("tcp")) {
-                return new TCPNeighbor(new InetSocketAddress(uri.getHost(), uri.getPort()), isConfigured, newTxLimit);
+                return new TCPNeighbor(new InetSocketAddress(uri.getHost(), uri.getPort()), isConfigured);
             }
             if (uri.getScheme().equals("udp")) {
-                return new UDPNeighbor(new InetSocketAddress(uri.getHost(), uri.getPort()), udpSocket, isConfigured, newTxLimit);
+                return new UDPNeighbor(new InetSocketAddress(uri.getHost(), uri.getPort()), udpSocket, isConfigured);
             }
         }
         throw new RuntimeException(uri.toString());

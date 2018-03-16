@@ -99,14 +99,11 @@ public class TipsManager {
 
     }
 
-    Hash transactionToApprove(final Set<Hash> visitedHashes, final Map<Hash, Long> diff, final Hash reference, final Hash extraTip, final int depth, final int iterations, Random seed) throws Exception {
+    Hash transactionToApprove(final Set<Hash> visitedHashes, final Map<Hash, Long> diff, final Hash reference, final Hash extraTip, int depth, final int iterations, Random seed) throws Exception {
 
         long startTime = System.nanoTime();
-        final int msDepth;
         if(depth > maxDepth) {
-            msDepth = maxDepth;
-        } else {
-            msDepth = depth;
+            depth = maxDepth;
         }
 
         if(milestone.latestSolidSubtangleMilestoneIndex > Milestone.MILESTONE_START_INDEX ||
@@ -116,7 +113,7 @@ public class TipsManager {
             Set<Hash> analyzedTips = new HashSet<>();
             Set<Hash> maxDepthOk = new HashSet<>();
             try {
-                Hash tip = entryPoint(reference, extraTip, msDepth);
+                Hash tip = entryPoint(reference, extraTip, depth);
                 serialUpdateRatings(visitedHashes, tip, ratings, analyzedTips, extraTip);
                 analyzedTips.clear();
                 if (ledgerValidator.updateDiff(visitedHashes, diff, tip)) {
@@ -125,7 +122,6 @@ public class TipsManager {
                     throw new RuntimeException("starting tip failed consistency check: " + tip.toString());
                 }
             } catch (Exception e) {
-                milestone.latestSnapshot.rwlock.readLock().unlock();
                 e.printStackTrace();
                 log.error("Encountered error: " + e.getLocalizedMessage());
                 throw e;
@@ -340,6 +336,10 @@ public class TipsManager {
             }
         }
         return rating;
+    }
+
+    public int getMaxDepth() {
+        return maxDepth;
     }
 
     boolean belowMaxDepth(Hash tip, int depth, Set<Hash> maxDepthOk) throws Exception {
